@@ -82,10 +82,29 @@ const supa = {
     const saved = localStorage.getItem("supa_session");
     if (!saved) return null;
     const session = JSON.parse(saved);
-    const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:{"Content-Type":"application/json",apikey:SUPA_KEY}, body:JSON.stringify({refresh_token:session.refresh_token}) });
-    const data = await r.json();
-    if (data.access_token) { supa._session=data; localStorage.setItem("supa_session",JSON.stringify(data)); return data; }
+    if (!session.refresh_token) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = session.expires_at || 0;
+    if (expiresAt - now > 300) { supa._session = session; return session; }
+    try {
+      const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:{"Content-Type":"application/json",apikey:SUPA_KEY}, body:JSON.stringify({refresh_token:session.refresh_token}) });
+      const data = await r.json();
+      if (data.access_token) { supa._session=data; localStorage.setItem("supa_session",JSON.stringify(data)); return data; }
+    } catch(e) { supa._session = session; return session; }
     localStorage.removeItem("supa_session"); return null;
+  },
+  startAutoRefresh() {
+    setInterval(async () => {
+      const saved = localStorage.getItem("supa_session");
+      if (!saved || !supa._session) return;
+      const session = JSON.parse(saved);
+      if (!session.refresh_token) return;
+      try {
+        const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:{"Content-Type":"application/json",apikey:SUPA_KEY}, body:JSON.stringify({refresh_token:session.refresh_token}) });
+        const data = await r.json();
+        if (data.access_token) { supa._session=data; localStorage.setItem("supa_session",JSON.stringify(data)); }
+      } catch(e) {}
+    }, 50 * 60 * 1000);
   },
   headers() { return {"Content-Type":"application/json",apikey:SUPA_KEY,Authorization:`Bearer ${supa._session?.access_token||SUPA_KEY}`,Prefer:"return=representation"}; },
   userId() { return supa._session?.user?.id; },
@@ -123,9 +142,22 @@ const METAPHORS = [
 const getMetaphor = pct => METAPHORS.find(m=>pct<=m.max)||METAPHORS[METAPHORS.length-1];
 
 async function searchBooks(q) {
-  const r=await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&fields=key,title,author_name,publisher,first_publish_year,cover_i&limit=8`);
-  const j=await r.json();
-  return (j.docs||[]).map(d=>({olId:d.key,title:d.title||"",author:(d.author_name||[]).join(", "),publisher:(d.publisher||[])[0]||"",year:d.first_publish_year||"",cover:d.cover_i?`https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg`:null}));
+  // Google Books API — 무료, CORS 허용, 한국어 책도 잘 검색됨
+  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=10&langRestrict=ko&printType=books`);
+  const j = await r.json();
+  if (!j.items) return [];
+  return j.items.map(item => {
+    const info = item.volumeInfo || {};
+    const cover = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null;
+    return {
+      olId: item.id,
+      title: info.title || "",
+      author: (info.authors || []).join(", "),
+      publisher: info.publisher || "",
+      year: info.publishedDate ? info.publishedDate.slice(0,4) : "",
+      cover: cover ? cover.replace("http://","https://") : null,
+    };
+  });
 }
 
 const fmtDate = iso => { if(!iso)return""; const d=new Date(iso); return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`; };
@@ -405,12 +437,26 @@ function BookDetail({book,onBack,onUpdate,onDel,onRecordPage,onAddNote,onEditNot
 }
 
 function AddForm({book,onChange,onBack,onConfirm}) {
+  const handleImgUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => onChange({...book, cover: ev.target.result});
+    reader.readAsDataURL(file);
+  };
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <button style={S.back} onClick={onBack}>← 검색으로</button>
-      <div style={{display:"flex",gap:16}}>
-        <div style={{...S.detailCov,width:90,minWidth:90,height:135,background:book.emotion?.color||C.pink}}>
-          {book.cover?<img src={book.cover} alt="" style={S.covImg}/>:<span style={{fontSize:28}}>📖</span>}
+      <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
+        <div style={{display:"flex",flexDirection:"column",gap:6,paddingTop:18}}>
+          <div style={{...S.detailCov,width:90,minWidth:90,height:135,background:book.emotion?.color||C.pink}}>
+            {book.cover?<img src={book.cover} alt="" style={S.covImg}/>:<span style={{fontSize:28}}>📖</span>}
+          </div>
+          <label style={{display:"block",textAlign:"center",fontSize:11,color:C.textMid,cursor:"pointer",border:`1.5px dashed ${C.border}`,borderRadius:3,padding:"4px 0",width:90,fontFamily:F,fontWeight:600}}>
+            사진 선택
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleImgUpload}/>
+          </label>
+          {book.cover && <button style={{fontSize:11,color:C.danger,background:"none",border:"none",cursor:"pointer",fontFamily:F}} onClick={()=>onChange({...book,cover:null})}>제거</button>}
         </div>
         <div style={{flex:1,display:"flex",flexDirection:"column",gap:8}}>
           {[["제목","title"],["저자","author"],["출판사","publisher"],["출판년도","year"]].map(([l,k])=>(
@@ -446,7 +492,39 @@ function VocabModal({initial,books,onSave,onClose}) {
   const [meaning,setMeaning]=useState(initial?.meaning||"");
   const [example,setExample]=useState(initial?.example||"");
   const [bookTitle,setBT]=useState(initial?.bookTitle||"");
-  return <Overlay><div style={S.modal}><div style={S.modalTitle}>{initial?"단어 편집":"단어 추가"}</div><div style={{display:"flex",flexDirection:"column",gap:8}}><input style={S.inp} placeholder="단어" value={word} onChange={e=>setWord(e.target.value)} autoFocus/><input style={S.inp} placeholder="뜻" value={meaning} onChange={e=>setMeaning(e.target.value)}/><input style={S.inp} placeholder="예문 (선택)" value={example} onChange={e=>setExample(e.target.value)}/><select style={S.inp} value={bookTitle} onChange={e=>setBT(e.target.value)}><option value="">출처 책 (선택)</option>{books.map(b=><option key={b.id} value={b.title}>{b.title}</option>)}</select></div><div style={{...S.row,marginTop:14}}><button style={S.pill} onClick={()=>word.trim()&&onSave({word,meaning,example,bookTitle})}>저장</button><button style={S.ghostSm} onClick={onClose}>취소</button></div></div></Overlay>;
+  return (
+    <Overlay>
+      <div style={S.modal}>
+        <div style={S.modalTitle}>{initial?"단어 편집":"단어 추가"}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div>
+            <div style={S.fLabel}>단어 <span style={{color:C.danger}}>*</span></div>
+            <input style={S.inp} placeholder="단어를 입력하세요" value={word} onChange={e=>setWord(e.target.value)} autoFocus/>
+          </div>
+          <div>
+            <div style={S.fLabel}>뜻 <span style={{color:C.textSoft,fontWeight:400}}>(나중에 추가 가능)</span></div>
+            <input style={S.inp} placeholder="뜻" value={meaning} onChange={e=>setMeaning(e.target.value)}/>
+          </div>
+          <div>
+            <div style={S.fLabel}>예문 <span style={{color:C.textSoft,fontWeight:400}}>(선택)</span></div>
+            <input style={S.inp} placeholder="예문" value={example} onChange={e=>setExample(e.target.value)}/>
+          </div>
+          <div>
+            <div style={S.fLabel}>출처 책 <span style={{color:C.textSoft,fontWeight:400}}>(선택)</span></div>
+            <select style={S.inp} value={bookTitle} onChange={e=>setBT(e.target.value)}>
+              <option value="">선택 안함</option>
+              {books.map(b=><option key={b.id} value={b.title}>{b.title}</option>)}
+            </select>
+          </div>
+        </div>
+        {!word.trim() && <div style={{fontSize:12,color:C.textSoft,marginTop:8}}>단어만 입력해도 바로 저장할 수 있어요. 뜻은 나중에 편집하면 돼요.</div>}
+        <div style={{...S.row,marginTop:14}}>
+          <button style={S.pill} onClick={()=>word.trim()&&onSave({word,meaning,example,bookTitle})} disabled={!word.trim()}>저장</button>
+          <button style={S.ghostSm} onClick={onClose}>취소</button>
+        </div>
+      </div>
+    </Overlay>
+  );
 }
 
 function BackupView({books,vocab,onBack,userEmail}) {
@@ -535,7 +613,7 @@ function App() {
   const [editVocab,setEditVocab]=useState(null);
   const timer=useRef(null);
 
-  useEffect(()=>{(async()=>{const sess=await supa.refreshSession();setSession(sess||false);setLoading(false);})();},[]);
+  useEffect(()=>{(async()=>{const sess=await supa.refreshSession();setSession(sess||false);setLoading(false);if(sess)supa.startAutoRefresh();})();},[]);
   useEffect(()=>{if(session)loadAll();},[session]);
   async function loadAll(){setLoading(true);const[bRows,vRows]=await Promise.all([supa.getBooks(),supa.getVocab()]);setBooks((bRows||[]).map(fromRow));setVocab((vRows||[]).map(fromVocabRow));setLoading(false);}
 
