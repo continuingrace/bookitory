@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BOOKITORY</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Nanum Square Neo', sans-serif;
+      background-color: #F4F2EF;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
+    }
+    @import url('https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&family=Black+Han+Sans&display=swap');
+    .brand-title {
+      font-family: 'Black Han Sans', sans-serif !important;
+      letter-spacing: 24px;
+      text-transform: uppercase;
+    }
+    .book-card { position: relative; overflow: visible !important; }
+    .book-card::after {
+      content: ''; position: absolute;
+      bottom: -1px; right: -1px;
+      width: 22px; height: 22px;
+      background: linear-gradient(225deg, #DDD8D2 42%, transparent 42%);
+      border-top: 1px solid #C2BDB7;
+      border-left: 1px solid #C2BDB7;
+      z-index: 2;
+    }
+    .book-card:nth-child(odd)::before {
+      content: ''; position: absolute;
+      top: -1px; left: -1px;
+      width: 14px; height: 14px;
+      background: linear-gradient(45deg, #DDD8D2 40%, transparent 40%);
+      border-bottom: 1px solid #C2BDB7;
+      border-right: 1px solid #C2BDB7;
+      z-index: 2;
+    }
+    .book-card:hover { transform: translateY(-3px) rotate(-0.4deg) !important; box-shadow: 4px 4px 0 #C2BDB7 !important; }
+    .hover-card:hover { background: #EDEAE6 !important; }
+    input:focus, textarea:focus, select:focus { border-color: #555 !important; box-shadow: none !important; outline: none; }
+    button:active { transform: translateY(1px); }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #F4F2EF; }
+    ::-webkit-scrollbar-thumb { background: #C8C3BC; border-radius: 2px; }
+    @media (max-width: 520px) {
+      .book-grid { grid-template-columns: repeat(2,1fr) !important; }
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&family=Black+Han+Sans&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const SUPA_URL = "https://twuvusjliabfuyompask.supabase.co";
+const SUPA_KEY = "sb_publishable_7ARC133ruOGCb6Y8KVOFwQ_q-bax4Ou";
+
+const supa = {
+  _session: null,
+  async signUp(email, password) {
+    const r = await fetch(`${SUPA_URL}/auth/v1/signup`, { method:"POST", headers:{"Content-Type":"application/json",apikey:SUPA_KEY}, body:JSON.stringify({email,password}) });
+    return r.json();
+  },
+  async signIn(email, password) {
+    const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`, { method:"POST", headers:{"Content-Type":"application/json",apikey:SUPA_KEY}, body:JSON.stringify({email,password}) });
+    const data = await r.json();
+    if (data.access_token) { supa._session=data; localStorage.setItem("supa_session",JSON.stringify(data)); }
+    return data;
+  },
+  async signOut() {
+    const token = supa._session?.access_token;
+    if (token) await fetch(`${SUPA_URL}/auth/v1/logout`, { method:"POST", headers:{apikey:SUPA_KEY,Authorization:`Bearer ${token}`} });
+    supa._session=null; localStorage.removeItem("supa_session");
+  },
+  async refreshSession() {
+    const saved = localStorage.getItem("supa_session");
+    if (!saved) return null;
+    const session = JSON.parse(saved);
+    const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, { method:"POST", headers:{"Content-Type":"application/json",apikey:SUPA_KEY}, body:JSON.stringify({refresh_token:session.refresh_token}) });
+    const data = await r.json();
+    if (data.access_token) { supa._session=data; localStorage.setItem("supa_session",JSON.stringify(data)); return data; }
+    localStorage.removeItem("supa_session"); return null;
+  },
+  headers() { return {"Content-Type":"application/json",apikey:SUPA_KEY,Authorization:`Bearer ${supa._session?.access_token||SUPA_KEY}`,Prefer:"return=representation"}; },
+  userId() { return supa._session?.user?.id; },
+  async getBooks() { const r=await fetch(`${SUPA_URL}/rest/v1/books?user_id=eq.${supa.userId()}&order=added_at.desc`,{headers:supa.headers()}); return r.json(); },
+  async insertBook(book) { const r=await fetch(`${SUPA_URL}/rest/v1/books`,{method:"POST",headers:supa.headers(),body:JSON.stringify({...toRow(book),user_id:supa.userId()})}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
+  async updateBook(id,book) { const r=await fetch(`${SUPA_URL}/rest/v1/books?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"PATCH",headers:supa.headers(),body:JSON.stringify(toRow(book))}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
+  async deleteBook(id) { await fetch(`${SUPA_URL}/rest/v1/books?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"DELETE",headers:supa.headers()}); },
+  async getVocab() { const r=await fetch(`${SUPA_URL}/rest/v1/vocab?user_id=eq.${supa.userId()}&order=created_at.desc`,{headers:supa.headers()}); return r.json(); },
+  async insertVocab(v) { const r=await fetch(`${SUPA_URL}/rest/v1/vocab`,{method:"POST",headers:supa.headers(),body:JSON.stringify({...v,user_id:supa.userId()})}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
+  async updateVocab(id,v) { const r=await fetch(`${SUPA_URL}/rest/v1/vocab?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"PATCH",headers:supa.headers(),body:JSON.stringify(v)}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
+  async deleteVocab(id) { await fetch(`${SUPA_URL}/rest/v1/vocab?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"DELETE",headers:supa.headers()}); },
+};
+
+function toRow(b) { return {title:b.title,author:b.author,publisher:b.publisher,year:b.year,cover:b.cover,status:b.status,current_page:b.currentPage,total_pages:b.totalPages,emotion:b.emotion,notes:b.notes||[],page_history:b.pageHistory||[],started_at:b.startedAt,finished_at:b.finishedAt,added_at:b.addedAt}; }
+function fromRow(r) { return {id:r.id,title:r.title,author:r.author,publisher:r.publisher,year:r.year,cover:r.cover,status:r.status,currentPage:r.current_page,totalPages:r.total_pages,emotion:r.emotion,notes:r.notes||[],pageHistory:r.page_history||[],startedAt:r.started_at,finishedAt:r.finished_at,addedAt:r.added_at}; }
+function fromVocabRow(r) { return {id:r.id,word:r.word,meaning:r.meaning,example:r.example,bookTitle:r.book_title,createdAt:r.created_at}; }
+
+const C = { bg:"#F4F2EF",surface:"#FFFFFF",pink:"#E8E4E0",accent:"#C9FF82",accentBg:"#F0FFE0",accentText:"#2D5A00",text:"#333333",textMid:"#666666",textSoft:"#999999",border:"#E2DDD8",danger:"#E57373",olive:"#8FBC8F" };
+const F = "'Nanum Square Neo',sans-serif";
+
+const EMOTIONS = [
+  {color:"#C9FF82",name:"싱그러운 라임",mood:"생동감"},{color:"#FFBBC1",name:"복숭아 여운",mood:"감동"},
+  {color:"#8FBC8F",name:"고요한 세이지",mood:"평온"},{color:"#80CEED",name:"물안개 블루",mood:"차분함"},
+  {color:"#FFD580",name:"햇살 노랑",mood:"기쁨"},{color:"#C3A6D4",name:"보랏빛 사유",mood:"사색"},
+  {color:"#FF9A8B",name:"살구빛 설렘",mood:"설렘"},{color:"#A8D8C8",name:"새벽 민트",mood:"청량함"},
+  {color:"#D4B896",name:"오래된 종이",mood:"그리움"},{color:"#F4A4C0",name:"분홍 몽상",mood:"포근함"},
+];
+
+const METAPHORS = [
+  {max:5,icon:"🌱",label:"씨앗을 심었어요",sub:"이제 막 시작!"},{max:15,icon:"🌿",label:"새싹이 돋아나고 있어요",sub:"조금씩 자라는 중"},
+  {max:30,icon:"🌾",label:"들판에 바람이 불어요",sub:"이야기 속으로"},{max:50,icon:"🌊",label:"항해 중 — 절반의 바다",sub:"여기서 포기하면 아쉽죠"},
+  {max:65,icon:"⛰️",label:"산을 반쯤 올랐어요",sub:"정상이 보이기 시작해요"},{max:80,icon:"🌅",label:"노을이 물들기 시작해요",sub:"곧 끝이 보여요"},
+  {max:95,icon:"🏁",label:"결승선이 눈 앞에!",sub:"마지막 스퍼트"},{max:100,icon:"🌟",label:"완독! 별이 되었어요",sub:"이 책은 당신 것"},
+];
+const getMetaphor = pct => METAPHORS.find(m=>pct<=m.max)||METAPHORS[METAPHORS.length-1];
+
+async function searchBooks(q) {
+  const r=await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&fields=key,title,author_name,publisher,first_publish_year,cover_i&limit=8`);
+  const j=await r.json();
+  return (j.docs||[]).map(d=>({olId:d.key,title:d.title||"",author:(d.author_name||[]).join(", "),publisher:(d.publisher||[])[0]||"",year:d.first_publish_year||"",cover:d.cover_i?`https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg`:null}));
+}
+
+const fmtDate = iso => { if(!iso)return""; const d=new Date(iso); return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`; };
+const fmtFull = iso => { if(!iso)return""; const d=new Date(iso); return `${fmtDate(iso)} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+
+const S = {
+  root:{minHeight:"100vh",background:C.bg,fontFamily:F,color:C.text},
+  nav:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 20px",height:52,background:C.surface,borderBottom:`1.5px solid ${C.text}`,position:"sticky",top:0,zIndex:100},
+  brand:{background:"none",border:"none",cursor:"pointer",fontSize:15,fontWeight:700,color:"#333",padding:0,fontFamily:"'Black Han Sans',sans-serif"},
+  navR:{display:"flex",alignItems:"center",gap:8},
+  navLink:{background:"none",border:"none",cursor:"pointer",fontSize:13,color:C.textMid,fontFamily:F},
+  pill:{background:C.accent,color:C.accentText,border:`1.5px solid ${C.accentText}`,borderRadius:4,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:F,boxShadow:"2px 2px 0 "+C.accentText},
+  main:{maxWidth:860,margin:"0 auto",padding:"24px 16px 80px"},
+  statsBar:{display:"flex",alignItems:"center",background:C.surface,borderRadius:4,padding:"16px 0",marginBottom:22,border:`1.5px solid ${C.border}`},
+  statCell:{display:"flex",flexDirection:"column",alignItems:"center",flex:1,padding:"0 10px"},
+  statNum:{fontSize:26,fontWeight:800,lineHeight:1,fontFamily:F},
+  statLabel:{fontSize:11,color:C.textSoft,marginTop:4,fontFamily:F},
+  statDiv:{width:1,height:28,background:C.border},
+  filterRow:{display:"flex",gap:6,marginBottom:20},
+  filterBtn:{border:`1.5px solid ${C.border}`,background:C.surface,borderRadius:4,padding:"5px 14px",cursor:"pointer",fontSize:12,color:C.textMid,fontFamily:F,fontWeight:600},
+  filterActive:{background:C.accent,color:C.accentText,border:`1.5px solid ${C.accentText}`,boxShadow:"1px 1px 0 "+C.accentText},
+  grid:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(148px,1fr))",gap:12},
+  card:{background:C.surface,borderRadius:4,overflow:"hidden",cursor:"pointer",border:`1.5px solid ${C.border}`,transition:"transform .15s,box-shadow .15s"},
+  cardCover:{width:"100%",aspectRatio:"2/3",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"},
+  covImg:{width:"100%",height:"100%",objectFit:"cover"},
+  donePill:{position:"absolute",top:6,right:6,background:C.accentBg,color:C.accentText,fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:2,border:`1px solid ${C.accentText}`},
+  cardBody:{padding:"10px 12px 14px"},
+  cardTitle:{fontSize:13,fontWeight:700,lineHeight:1.35,color:C.text,marginBottom:2,fontFamily:F},
+  cardAuthor:{fontSize:11,color:C.textMid,fontFamily:F},
+  metaRow:{display:"flex",alignItems:"center",gap:6,marginTop:8},
+  bar:{height:3,background:C.border,overflow:"hidden"},
+  barFill:{height:"100%",transition:"width .4s"},
+  pct:{fontSize:10,color:C.textSoft,display:"block",textAlign:"right",marginTop:1},
+  emoRow:{display:"flex",alignItems:"center",gap:5,marginTop:8},
+  dot:{width:8,height:8,borderRadius:"50%",display:"inline-block",flexShrink:0},
+  emoLabel:{fontSize:10,color:C.textMid,fontFamily:F},
+  empty:{textAlign:"center",padding:"64px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:12},
+  back:{background:"none",border:"none",cursor:"pointer",color:C.textMid,fontSize:13,padding:0,fontFamily:F},
+  detailTop:{display:"flex",gap:20,marginBottom:22},
+  detailCov:{width:110,minWidth:110,aspectRatio:"2/3",borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",border:`1.5px solid ${C.border}`},
+  dtTitle:{fontSize:19,fontWeight:800,margin:"0 0 6px",lineHeight:1.3,fontFamily:F},
+  dtAuthor:{color:C.textMid,margin:"0 0 3px",fontSize:14,fontFamily:F},
+  dtMeta:{color:C.textSoft,margin:"0 0 2px",fontSize:13,fontFamily:F},
+  emoBtn:{display:"flex",alignItems:"center",gap:6,background:"none",border:`1.5px solid ${C.border}`,borderRadius:4,padding:"5px 12px",cursor:"pointer",fontSize:12,fontFamily:F,color:C.text},
+  emoPicker:{position:"absolute",left:0,top:"calc(100% + 6px)",background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:4,padding:10,zIndex:50,boxShadow:`3px 3px 0 ${C.border}`,display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto",minWidth:190},
+  emoPickItem:{display:"flex",alignItems:"center",gap:10,padding:"5px 6px",cursor:"pointer"},
+  timelineBox:{background:C.surface,borderRadius:4,padding:"16px 18px",marginBottom:16,border:`1.5px solid ${C.border}`},
+  timelineTitle:{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:14,fontFamily:F},
+  timeline:{display:"flex",alignItems:"flex-start",justifyContent:"center"},
+  tlLine:{flex:1,height:0,marginTop:18,alignSelf:"flex-start",borderTop:`1.5px dashed ${C.border}`},
+  tlDot:{width:34,height:34,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,border:`1.5px solid ${C.border}`},
+  histBtn:{fontSize:12,color:C.accentText,background:C.accentBg,border:`1px solid ${C.accentText}`,cursor:"pointer",marginTop:10,fontFamily:F,fontWeight:700,borderRadius:3,padding:"3px 10px"},
+  histList:{display:"flex",flexDirection:"column",gap:6,marginTop:8,paddingTop:8,borderTop:`1px dashed ${C.border}`},
+  histItem:{display:"flex",alignItems:"center",gap:10,fontSize:12,fontFamily:F},
+  histPage:{fontWeight:700,color:C.text,minWidth:40},
+  histPct:{color:C.accentText,fontWeight:700,minWidth:36},
+  histDate:{color:C.textSoft},
+  progressBox:{background:C.surface,borderRadius:4,padding:"16px 18px",marginBottom:22,border:`1.5px solid ${C.border}`},
+  metaphorBox:{marginTop:14},
+  metaphorTop:{display:"flex",alignItems:"center",gap:12,marginBottom:10},
+  metaphorIco:{fontSize:28},
+  metaphorLabel:{fontSize:14,fontWeight:700,color:C.text,fontFamily:F},
+  metaphorSub:{fontSize:12,color:C.textMid,fontFamily:F},
+  metaphorPct:{marginLeft:"auto",fontSize:20,fontWeight:800,color:C.accentText,fontFamily:F},
+  bigBar:{height:12,background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:2,overflow:"hidden"},
+  bigBarFill:{height:"100%",transition:"width .5s",display:"flex",alignItems:"center",paddingLeft:6},
+  barLabel:{fontSize:10,color:"rgba(45,90,0,.85)",fontWeight:700},
+  pageInp:{width:90,padding:"6px 10px",border:`1.5px solid ${C.border}`,borderRadius:3,fontSize:15,fontFamily:F,textAlign:"center",background:C.bg,color:C.text},
+  secTitle:{fontSize:15,fontWeight:700,color:C.text,fontFamily:F},
+  noteCard:{background:C.surface,borderRadius:3,padding:"13px 15px",border:`1.5px solid ${C.border}`},
+  noteText:{margin:"6px 0 8px",fontSize:14,lineHeight:1.85,color:C.text,whiteSpace:"pre-wrap",wordBreak:"break-word",fontFamily:F},
+  noteMeta:{fontSize:11,color:C.textSoft,fontFamily:F},
+  toggleBtn:{border:`1.5px solid ${C.border}`,borderRadius:4,padding:"5px 12px",cursor:"pointer",fontSize:12,fontFamily:F,fontWeight:600,background:"none",color:C.textMid},
+  searchWrap:{display:"flex",alignItems:"center",gap:10,background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:4,padding:"9px 14px",marginBottom:14},
+  searchInput:{flex:1,border:"none",outline:"none",fontSize:14,fontFamily:F,background:"transparent",color:C.text},
+  resItem:{display:"flex",gap:12,padding:"11px 13px",background:C.surface,borderRadius:4,cursor:"pointer",border:`1.5px solid ${C.border}`,marginBottom:8},
+  resTitle:{fontSize:14,fontWeight:700,color:C.text,marginBottom:3,fontFamily:F},
+  resMeta:{fontSize:12,color:C.textMid,fontFamily:F},
+  hint:{color:C.textSoft,fontSize:13,margin:"8px 0",fontFamily:F},
+  ghost:{background:"none",border:`1.5px dashed ${C.border}`,borderRadius:4,padding:"12px 20px",cursor:"pointer",fontSize:13,color:C.textMid,fontFamily:F,width:"100%",marginTop:14},
+  ghostSm:{background:"none",border:`1.5px solid ${C.border}`,borderRadius:4,padding:"6px 14px",cursor:"pointer",fontSize:13,color:C.textMid,fontFamily:F},
+  fLabel:{fontSize:11,color:C.textMid,marginBottom:4,fontWeight:700,fontFamily:F},
+  inp:{width:"100%",padding:"9px 12px",border:`1.5px solid ${C.border}`,borderRadius:4,fontSize:14,fontFamily:F,background:C.surface,color:C.text,boxSizing:"border-box",outline:"none"},
+  modal:{background:C.surface,borderRadius:4,padding:24,width:"100%",maxWidth:460,border:`1.5px solid ${C.border}`,boxShadow:`4px 4px 0 ${C.border}`,maxHeight:"90vh",overflowY:"auto"},
+  modalTitle:{fontSize:16,fontWeight:800,marginBottom:16,color:C.text,fontFamily:F},
+  textarea:{width:"100%",minHeight:130,padding:"10px 12px",border:`1.5px solid ${C.border}`,borderRadius:4,fontSize:14,fontFamily:F,background:C.surface,color:C.text,resize:"vertical",lineHeight:1.85,boxSizing:"border-box",outline:"none"},
+  vocabCard:{background:C.surface,borderRadius:4,padding:"14px 16px",border:`1.5px solid ${C.border}`,marginBottom:10},
+  vocabWord:{fontSize:17,fontWeight:800,color:C.text,marginBottom:4,fontFamily:F},
+  vocabMeaning:{fontSize:14,color:C.text,marginBottom:3,fontFamily:F},
+  vocabEx:{fontSize:13,color:C.textMid,fontStyle:"italic",marginBottom:4,fontFamily:F},
+  vocabSrc:{fontSize:12,color:C.textSoft,marginBottom:8,fontFamily:F},
+  row:{display:"flex",gap:8,alignItems:"center"},
+  authWrap:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,padding:16},
+  authBox:{background:C.surface,borderRadius:6,padding:"36px 32px",width:"100%",maxWidth:360,border:`1.5px solid ${C.border}`,boxShadow:`4px 4px 0 ${C.border}`,textAlign:"center"},
+  authErr:{background:C.bg,color:C.danger,fontSize:13,padding:"8px 12px",borderRadius:3,marginTop:10,textAlign:"left",border:`1px solid ${C.danger}44`,fontFamily:F},
+  sectionPaper:{background:C.surface,borderRadius:4,padding:"18px 20px",border:`1.5px solid ${C.border}`,marginBottom:16},
+  backupBtn:{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:4,padding:"10px 16px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:F,color:C.text,textAlign:"left",width:"100%",boxShadow:`2px 2px 0 ${C.border}`,marginBottom:10},
+  fileLabel:{display:"inline-block",background:C.bg,border:`1.5px dashed ${C.border}`,borderRadius:4,padding:"10px 18px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:F,color:C.textMid},
+};
+
+function Chip({children,danger,onClick}) {
+  return <button onClick={onClick} style={{background:"none",border:`1.5px solid ${danger?C.danger+"66":C.border}`,borderRadius:3,padding:"3px 10px",cursor:"pointer",fontSize:12,color:danger?C.danger:C.textMid,fontFamily:F,fontWeight:600}}>{children}</button>;
+}
+function Overlay({children}) {
+  return <div style={{position:"fixed",inset:0,background:"rgba(60,40,50,0.28)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}>{children}</div>;
+}
+function CoverThumb({src}) {
+  return <div style={{width:52,minWidth:52,height:74,borderRadius:4,background:C.pink,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>{src?<img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:20}}>📖</span>}</div>;
+}
+function SubHeader({title,onBack,right}) {
+  return <div style={{display:"flex",alignItems:"center",marginBottom:24,gap:12}}><button style={S.back} onClick={onBack}>← 뒤로</button><span style={{...S.secTitle,fontSize:18,flex:1}}>{title}</span>{right}</div>;
+}
+function TLItem({icon,label,date,sub,active}) {
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+      <div style={{...S.tlDot,background:active?C.accent:C.border,color:active?C.accentText:C.textSoft}}>{icon}</div>
+      <div style={{textAlign:"center",minWidth:72}}>
+        <div style={{fontSize:10,color:C.textMid,fontWeight:600}}>{label}</div>
+        <div style={{fontSize:11,color:active?C.accentText:C.textSoft,fontWeight:active?700:400}}>{date}</div>
+        {sub&&<div style={{fontSize:10,color:C.textSoft}}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function StatsBar({books,vocab}) {
+  const reading=books.filter(b=>b.status==="reading").length;
+  const done=books.filter(b=>b.status==="done").length;
+  return (
+    <div style={S.statsBar}>
+      {[[reading,"읽는 중",C.accentText],[done,"완독",C.olive],[books.length,"전체",C.text],[vocab.length,"단어",C.textMid]].map(([n,l,c],i,a)=>(
+        <div key={l} style={{display:"flex",alignItems:"center",flex:1}}>
+          <div style={S.statCell}><span style={{...S.statNum,color:c}}>{n}</span><span style={S.statLabel}>{l}</span></div>
+          {i<a.length-1&&<div style={S.statDiv}/>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BookCard({book,onClick}) {
+  const pct=book.totalPages&&book.currentPage?Math.min(100,Math.round(Number(book.currentPage)/Number(book.totalPages)*100)):null;
+  const meta=pct!==null?getMetaphor(pct):null;
+  return (
+    <div style={S.card} className="book-card" onClick={onClick}>
+      <div style={{...S.cardCover,background:book.emotion?.color||C.pink}}>
+        {book.cover?<img src={book.cover} alt="" style={S.covImg}/>:<span style={{fontSize:34}}>📖</span>}
+        {book.status==="done"&&<div style={S.donePill}>완독 ✓</div>}
+      </div>
+      <div style={S.cardBody}>
+        <div style={S.cardTitle}>{book.title}</div>
+        <div style={S.cardAuthor}>{book.author}</div>
+        {meta&&book.status==="reading"&&(
+          <div style={S.metaRow}>
+            <span style={{fontSize:15}}>{meta.icon}</span>
+            <div style={{flex:1}}>
+              <div style={S.bar}><div style={{...S.barFill,width:`${pct}%`,background:book.emotion?.color||C.accent}}/></div>
+              <span style={S.pct}>{pct}%</span>
+            </div>
+          </div>
+        )}
+        {book.emotion&&<div style={S.emoRow}><span style={{...S.dot,background:book.emotion.color}}/><span style={S.emoLabel}>{book.emotion.name}</span></div>}
+      </div>
+    </div>
+  );
+}
+
+function BookDetail({book,onBack,onUpdate,onDel,onRecordPage,onAddNote,onEditNote,onDelNote}) {
+  const [editPage,setEditPage]=useState(false);
+  const [curIn,setCurIn]=useState(book.currentPage||"");
+  const [totIn,setTotIn]=useState(book.totalPages||"");
+  const [showEmo,setShowEmo]=useState(false);
+  const [confDel,setConfDel]=useState(false);
+  const [showHist,setShowHist]=useState(false);
+  const pct=book.totalPages&&book.currentPage?Math.min(100,Math.round(Number(book.currentPage)/Number(book.totalPages)*100)):null;
+  const meta=pct!==null?getMetaphor(pct):null;
+
+  return (
+    <main style={S.main}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24}}>
+        <button onClick={onBack} style={S.back}>← 뒤로</button>
+        <div style={S.row}>
+          <button style={{...S.toggleBtn,...(book.status==="done"?{background:C.accentBg,color:C.accentText,borderColor:C.accent}:{})}}
+            onClick={()=>onUpdate(book.id,{status:book.status==="done"?"reading":"done",...(book.status!=="done"?{finishedAt:new Date().toISOString()}:{finishedAt:null})})}>
+            {book.status==="done"?"✓ 완독":"완독 표시"}
+          </button>
+          <Chip danger onClick={()=>setConfDel(true)}>삭제</Chip>
+        </div>
+      </div>
+      <div style={S.detailTop}>
+        <div style={{...S.detailCov,background:book.emotion?.color||C.pink}}>
+          {book.cover?<img src={book.cover} alt="" style={S.covImg}/>:<span style={{fontSize:40}}>📖</span>}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <h1 style={S.dtTitle}>{book.title}</h1>
+          <p style={S.dtAuthor}>{book.author}</p>
+          {book.publisher&&<p style={S.dtMeta}>{book.publisher}</p>}
+          {book.year&&<p style={S.dtMeta}>{book.year}년</p>}
+          <div style={{position:"relative",marginTop:10}}>
+            <button style={S.emoBtn} onClick={()=>setShowEmo(!showEmo)}>
+              <span style={{...S.dot,width:12,height:12,background:book.emotion?.color}}/>{book.emotion?.name||"감정 선택"}
+            </button>
+            {showEmo&&(
+              <div style={S.emoPicker}>
+                {EMOTIONS.map(e=>(
+                  <div key={e.color} style={S.emoPickItem} className="hover-card" onClick={()=>{onUpdate(book.id,{emotion:e});setShowEmo(false);}}>
+                    <span style={{...S.dot,width:14,height:14,background:e.color}}/>
+                    <div><div style={{fontSize:13,color:C.text,fontWeight:500}}>{e.name}</div><div style={{fontSize:11,color:C.textMid}}>{e.mood}</div></div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={S.timelineBox}>
+        <div style={S.timelineTitle}>📅 독서 여정</div>
+        <div style={S.timeline}>
+          <TLItem icon="🌱" label="시작" date={fmtDate(book.startedAt)} active={!!book.startedAt}/>
+          <div style={S.tlLine}/>
+          <TLItem icon="📖" label="마지막 기록" date={book.pageHistory?.length?fmtDate(book.pageHistory[book.pageHistory.length-1].date):"—"} sub={book.currentPage?`${book.currentPage}쪽`:""} active={!!(book.pageHistory?.length)}/>
+          <div style={S.tlLine}/>
+          <TLItem icon="🌟" label="완독" date={fmtDate(book.finishedAt)||"—"} active={!!book.finishedAt}/>
+        </div>
+        {book.pageHistory?.length>0&&<button style={S.histBtn} onClick={()=>setShowHist(!showHist)}>{showHist?"기록 접기 ▲":"기록 전체 보기 ▼"} ({book.pageHistory.length}회)</button>}
+        {showHist&&<div style={S.histList}>{[...(book.pageHistory||[])].reverse().map((h,i)=><div key={i} style={S.histItem}><span style={S.histPage}>{h.page}쪽</span>{h.total&&<span style={S.histPct}>{Math.round(Number(h.page)/Number(h.total)*100)}%</span>}<span style={S.histDate}>{fmtFull(h.date)}</span></div>)}</div>}
+      </div>
+
+      <div style={S.progressBox}>
+        {editPage?(
+          <div>
+            <div style={S.row}>
+              <input style={S.pageInp} type="number" placeholder="현재 쪽" value={curIn} onChange={e=>setCurIn(e.target.value)} autoFocus/>
+              <span style={{color:C.textSoft}}>/</span>
+              <input style={S.pageInp} type="number" placeholder="전체 쪽" value={totIn} onChange={e=>setTotIn(e.target.value)}/>
+              <button style={S.pill} onClick={()=>{onRecordPage(book.id,curIn,totIn);setEditPage(false);}}>저장</button>
+              <button style={S.ghostSm} onClick={()=>setEditPage(false)}>취소</button>
+            </div>
+            <p style={{fontSize:11,color:C.textSoft,marginTop:6}}>저장하면 기록 히스토리에 쌓여요</p>
+          </div>
+        ):(
+          <div style={{cursor:"pointer"}} onClick={()=>setEditPage(true)}>
+            {book.currentPage?<span style={{fontSize:17,color:C.textMid}}><b style={{color:C.text,fontSize:24}}>{book.currentPage}</b> / {book.totalPages||"?"} 쪽 <span style={{fontSize:12,color:C.textSoft}}>— 탭해서 업데이트</span></span>:<span style={{fontSize:14,color:C.textSoft}}>쪽수를 기록해보세요 →</span>}
+          </div>
+        )}
+        {meta&&pct!==null&&(
+          <div style={S.metaphorBox}>
+            <div style={S.metaphorTop}>
+              <span style={S.metaphorIco}>{meta.icon}</span>
+              <div><div style={S.metaphorLabel}>{meta.label}</div><div style={S.metaphorSub}>{meta.sub}</div></div>
+              <span style={S.metaphorPct}>{pct}%</span>
+            </div>
+            <div style={S.bigBar}><div style={{...S.bigBarFill,width:`${pct}%`,background:book.emotion?.color||C.accent}}>{pct>8&&<span style={S.barLabel}>{pct}%</span>}</div></div>
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <span style={S.secTitle}>기록</span>
+        <button style={S.pill} onClick={onAddNote}>+ 추가</button>
+      </div>
+      {(!book.notes||!book.notes.length)&&<p style={S.hint}>문장이나 느낌을 기록해보세요</p>}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {(book.notes||[]).map(n=>(
+          <div key={n.id} style={{...S.noteCard,borderLeft:`3px solid ${book.emotion?.color||C.accent}`}}>
+            <span style={{fontSize:11,color:C.textSoft}}>{n.type==="sentence"?"📌 문장":"💭 느낌"}</span>
+            <p style={S.noteText}>{n.text}</p>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{n.page&&<span style={S.noteMeta}>p.{n.page}</span>}<span style={S.noteMeta}>{fmtFull(n.createdAt)}{n.editedAt?" (편집됨)":""}</span></div>
+            <div style={{...S.row,marginTop:6}}><Chip onClick={()=>onEditNote(n)}>편집</Chip><Chip danger onClick={()=>onDelNote(n.id)}>삭제</Chip></div>
+          </div>
+        ))}
+      </div>
+      {confDel&&<Overlay><div style={{background:C.surface,borderRadius:6,padding:28,textAlign:"center",maxWidth:300,width:"100%",border:`1.5px solid ${C.border}`,boxShadow:`4px 4px 0 ${C.border}`}}><p style={{fontWeight:600,color:C.text,marginBottom:16}}>이 책을 삭제할까요?</p><div style={{...S.row,justifyContent:"center"}}><button style={{...S.pill,background:C.danger,color:"#fff",border:"none",boxShadow:"none"}} onClick={()=>onDel(book.id)}>삭제</button><button style={S.ghostSm} onClick={()=>setConfDel(false)}>취소</button></div></div></Overlay>}
+    </main>
+  );
+}
+
+function AddForm({book,onChange,onBack,onConfirm}) {
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <button style={S.back} onClick={onBack}>← 검색으로</button>
+      <div style={{display:"flex",gap:16}}>
+        <div style={{...S.detailCov,width:90,minWidth:90,height:135,background:book.emotion?.color||C.pink}}>
+          {book.cover?<img src={book.cover} alt="" style={S.covImg}/>:<span style={{fontSize:28}}>📖</span>}
+        </div>
+        <div style={{flex:1,display:"flex",flexDirection:"column",gap:8}}>
+          {[["제목","title"],["저자","author"],["출판사","publisher"],["출판년도","year"]].map(([l,k])=>(
+            <div key={k}><div style={S.fLabel}>{l}</div><input style={S.inp} value={book[k]} onChange={e=>onChange({...book,[k]:e.target.value})}/></div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div style={S.fLabel}>읽기 상태</div>
+        <div style={S.row}>{[["reading","읽는 중"],["done","완독"]].map(([k,l])=><button key={k} style={{...S.filterBtn,...(book.status===k?S.filterActive:{})}} onClick={()=>onChange({...book,status:k})}>{l}</button>)}</div>
+      </div>
+      <div>
+        <div style={S.fLabel}>감정 색상</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:6}}>
+          {EMOTIONS.map(e=><div key={e.color} title={e.name} style={{width:28,height:28,borderRadius:"50%",background:e.color,cursor:"pointer",outline:book.emotion?.color===e.color?`3px solid ${C.text}`:"none",outlineOffset:2}} onClick={()=>onChange({...book,emotion:e})}/>)}
+        </div>
+        {book.emotion&&<div style={{fontSize:12,color:C.textMid,marginTop:6}}>{book.emotion.name} — {book.emotion.mood}</div>}
+      </div>
+      <button style={{...S.pill,width:"100%",padding:"13px",fontSize:15,fontWeight:700}} onClick={onConfirm}>책장에 추가하기</button>
+    </div>
+  );
+}
+
+function NoteModal({initial,onSave,onClose}) {
+  const [type,setType]=useState(initial?.type||"sentence");
+  const [text,setText]=useState(initial?.text||"");
+  const [page,setPage]=useState(initial?.page||"");
+  return <Overlay><div style={S.modal}><div style={S.modalTitle}>{initial?"기록 편집":"새 기록"}</div><div style={{...S.row,marginBottom:12}}>{[["sentence","📌 문장"],["feeling","💭 느낌"]].map(([k,l])=><button key={k} style={{...S.filterBtn,...(type===k?S.filterActive:{})}} onClick={()=>setType(k)}>{l}</button>)}</div><textarea style={S.textarea} placeholder={type==="sentence"?"밑줄 친 문장을 입력하세요...":"느낀 점을 자유롭게 적어보세요..."} value={text} onChange={e=>setText(e.target.value)} autoFocus/><input style={{...S.inp,marginTop:8}} type="number" placeholder="쪽수 (선택)" value={page} onChange={e=>setPage(e.target.value)}/><div style={{...S.row,marginTop:14}}><button style={S.pill} onClick={()=>text.trim()&&onSave({type,text,page})}>저장</button><button style={S.ghostSm} onClick={onClose}>취소</button></div></div></Overlay>;
+}
+
+function VocabModal({initial,books,onSave,onClose}) {
+  const [word,setWord]=useState(initial?.word||"");
+  const [meaning,setMeaning]=useState(initial?.meaning||"");
+  const [example,setExample]=useState(initial?.example||"");
+  const [bookTitle,setBT]=useState(initial?.bookTitle||"");
+  return <Overlay><div style={S.modal}><div style={S.modalTitle}>{initial?"단어 편집":"단어 추가"}</div><div style={{display:"flex",flexDirection:"column",gap:8}}><input style={S.inp} placeholder="단어" value={word} onChange={e=>setWord(e.target.value)} autoFocus/><input style={S.inp} placeholder="뜻" value={meaning} onChange={e=>setMeaning(e.target.value)}/><input style={S.inp} placeholder="예문 (선택)" value={example} onChange={e=>setExample(e.target.value)}/><select style={S.inp} value={bookTitle} onChange={e=>setBT(e.target.value)}><option value="">출처 책 (선택)</option>{books.map(b=><option key={b.id} value={b.title}>{b.title}</option>)}</select></div><div style={{...S.row,marginTop:14}}><button style={S.pill} onClick={()=>word.trim()&&onSave({word,meaning,example,bookTitle})}>저장</button><button style={S.ghostSm} onClick={onClose}>취소</button></div></div></Overlay>;
+}
+
+function BackupView({books,vocab,onBack,userEmail}) {
+  const [restoreFile,setRestoreFile]=useState(null);
+  const [restoreMsg,setRestoreMsg]=useState("");
+  const [copied,setCopied]=useState(false);
+  const makeBackup=()=>JSON.stringify({version:1,exportedAt:new Date().toISOString(),userEmail,books,vocab},null,2);
+  const downloadBackup=()=>{const blob=new Blob([makeBackup()],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`bookitory_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);};
+  const mailBackup=()=>{const subject=encodeURIComponent(`[Bookitory] 독서 기록 백업 — ${new Date().toISOString().slice(0,10)}`);const body=encodeURIComponent(`아래 JSON을 복사해서 보관하세요.\n\n${makeBackup()}`);window.open(`mailto:${userEmail||""}?subject=${subject}&body=${body}`);};
+  const copyBackup=async()=>{await navigator.clipboard.writeText(makeBackup());setCopied(true);setTimeout(()=>setCopied(false),2000);};
+  const handleRestore=(e)=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=(ev)=>{try{const parsed=JSON.parse(ev.target.result);if(!parsed.books||!parsed.vocab)throw new Error("형식 오류");setRestoreFile(parsed);setRestoreMsg(`📦 백업 파일 확인됨 — 책 ${parsed.books.length}권, 단어 ${parsed.vocab.length}개\n내보낸 날짜: ${parsed.exportedAt?.slice(0,10)||"알 수 없음"}`);}catch{setRestoreMsg("❌ 올바른 Bookitory 백업 파일이 아니에요.");setRestoreFile(null);}};reader.readAsText(file);};
+  return (
+    <main style={S.main}>
+      <SubHeader title="데이터 백업 / 복구" onBack={onBack}/>
+      <div style={{...S.noteCard,borderLeft:`3px solid ${C.accentText}`,marginBottom:20}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.accentText,marginBottom:6}}>🔒 데이터 보안 안내</div>
+        <div style={{fontSize:13,color:C.textMid,lineHeight:1.8}}>기록한 모든 데이터는 <b>본인 계정({userEmail})만</b> 접근할 수 있어요.<br/>Supabase Row Level Security로 보호되어 다른 사용자는 조회 불가해요.</div>
+      </div>
+      <div style={S.sectionPaper}>
+        <div style={{...S.secTitle,marginBottom:12}}>📤 백업하기</div>
+        <div style={{fontSize:13,color:C.textMid,marginBottom:16}}>현재 저장된 책 <b>{books.length}권</b>, 단어 <b>{vocab.length}개</b>를 백업해요.</div>
+        <button style={S.backupBtn} onClick={downloadBackup}>⬇ JSON 파일로 다운로드</button>
+        <button style={S.backupBtn} onClick={mailBackup}>✉ 메일 앱으로 전송하기</button>
+        <button style={{...S.backupBtn,...(copied?{background:C.accentBg,color:C.accentText}:{})}} onClick={copyBackup}>{copied?"✓ 복사됨!":"📋 클립보드에 복사"}</button>
+      </div>
+      <div style={S.sectionPaper}>
+        <div style={{...S.secTitle,marginBottom:12}}>📥 복구하기</div>
+        <div style={{fontSize:13,color:C.textMid,marginBottom:16}}>이전에 다운로드한 <b>.json 백업 파일</b>을 선택해주세요.</div>
+        <label style={S.fileLabel}>파일 선택하기<input type="file" accept=".json" style={{display:"none"}} onChange={handleRestore}/></label>
+        {restoreMsg&&<div style={{marginTop:12,fontSize:13,color:C.textMid,whiteSpace:"pre-line",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:3,padding:"10px 14px"}}>{restoreMsg}</div>}
+        {restoreFile&&<button style={{...S.backupBtn,marginTop:10,background:C.accent,color:C.accentText,border:`1.5px solid ${C.accentText}`,boxShadow:`2px 2px 0 ${C.accentText}`}} onClick={()=>alert("복구 기능은 추후 업데이트 예정이에요.\n지금은 백업 파일을 안전하게 보관해주세요.")}>이 파일로 복구하기</button>}
+      </div>
+    </main>
+  );
+}
+
+function AuthScreen({onLogin}) {
+  const [mode,setMode]=useState("login");
+  const [email,setEmail]=useState("");
+  const [pw,setPw]=useState("");
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [done,setDone]=useState(false);
+  const submit=async()=>{if(!email||!pw){setErr("이메일과 비밀번호를 입력해주세요");return;}setLoading(true);setErr("");if(mode==="signup"){const data=await supa.signUp(email,pw);if(data.user)setDone(true);else setErr(data.msg||data.message||"회원가입 실패");}else{const data=await supa.signIn(email,pw);if(data.access_token)onLogin(data);else setErr(data.error_description||data.message||"로그인 실패");}setLoading(false);};
+  if(done)return <div style={S.authWrap}><div style={S.authBox}><div style={{fontSize:40,marginBottom:12}}>📬</div><div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:8,fontFamily:F}}>이메일을 확인해주세요!</div><div style={{fontSize:14,color:C.textMid,marginBottom:20,lineHeight:1.7}}><b>{email}</b>로 인증 메일을 보냈어요.<br/>링크 클릭 후 로그인해주세요.</div><button style={S.pill} onClick={()=>{setDone(false);setMode("login");}}>로그인하러 가기</button></div></div>;
+  return (
+    <div style={S.authWrap}>
+      <div style={S.authBox}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:22}}>
+          <div className="brand-title" style={{fontSize:26,color:"#333",fontFamily:"'Black Han Sans',sans-serif"}}>BOOKITORY</div>
+          <div style={{fontSize:12,color:C.textSoft,marginTop:8,fontFamily:F}}>나만의 독서 기록 공간</div>
+        </div>
+        <div style={{display:"flex",background:C.bg,borderRadius:4,padding:3,marginBottom:20,gap:4,border:`1.5px solid ${C.border}`}}>
+          {[["login","로그인"],["signup","회원가입"]].map(([k,l])=>(
+            <button key={k} style={{flex:1,padding:"7px 0",borderRadius:3,border:"none",cursor:"pointer",fontFamily:F,fontSize:13,fontWeight:700,background:mode===k?C.surface:"transparent",color:mode===k?C.text:C.textSoft,boxShadow:mode===k?`1px 1px 0 ${C.border}`:"none"}} onClick={()=>{setMode(k);setErr("");}}>{l}</button>
+          ))}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12,textAlign:"left"}}>
+          <div><div style={S.fLabel}>이메일</div><input style={S.inp} type="email" placeholder="your@email.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} autoFocus/></div>
+          <div><div style={S.fLabel}>비밀번호{mode==="signup"&&<span style={{color:C.textSoft,fontWeight:400}}> (6자 이상)</span>}</div><input style={S.inp} type="password" placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+        </div>
+        {err&&<div style={S.authErr}>{err}</div>}
+        <button style={{...S.pill,width:"100%",padding:"13px",fontSize:15,marginTop:20}} onClick={submit} disabled={loading}>{loading?"처리 중...":mode==="login"?"로그인":"가입하기"}</button>
+        <div style={{fontSize:12,color:C.textSoft,textAlign:"center",marginTop:16}}>PC·모바일 어디서든 같은 계정으로 동기화돼요 ☁️</div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [session,setSession]=useState(null);
+  const [books,setBooks]=useState([]);
+  const [vocab,setVocab]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [view,setView]=useState("home");
+  const [selBook,setSelBook]=useState(null);
+  const [filter,setFilter]=useState("all");
+  const [addStep,setAddStep]=useState(1);
+  const [searchQ,setSearchQ]=useState("");
+  const [searchRes,setSearchRes]=useState([]);
+  const [searching,setSrching]=useState(false);
+  const [pending,setPending]=useState(null);
+  const [noteModal,setNoteModal]=useState(false);
+  const [editNote,setEditNote]=useState(null);
+  const [vocabModal,setVocabModal]=useState(false);
+  const [editVocab,setEditVocab]=useState(null);
+  const timer=useRef(null);
+
+  useEffect(()=>{(async()=>{const sess=await supa.refreshSession();setSession(sess||false);setLoading(false);})();},[]);
+  useEffect(()=>{if(session)loadAll();},[session]);
+  async function loadAll(){setLoading(true);const[bRows,vRows]=await Promise.all([supa.getBooks(),supa.getVocab()]);setBooks((bRows||[]).map(fromRow));setVocab((vRows||[]).map(fromVocabRow));setLoading(false);}
+
+  const handleSearch=q=>{setSearchQ(q);clearTimeout(timer.current);if(!q.trim()){setSearchRes([]);return;}timer.current=setTimeout(async()=>{setSrching(true);try{setSearchRes(await searchBooks(q));}catch{setSearchRes([]);}setSrching(false);},500);};
+  const pickBook=b=>{setPending({...b,id:null,status:"reading",currentPage:"",totalPages:"",emotion:EMOTIONS[0],notes:[],startedAt:new Date().toISOString(),pageHistory:[],finishedAt:null,addedAt:new Date().toISOString()});setAddStep(2);};
+  const confirmAdd=async()=>{if(!pending)return;const row=await supa.insertBook(pending);if(row?.id)setBooks(prev=>[fromRow(row),...prev]);setView("home");setAddStep(1);setSearchQ("");setSearchRes([]);setPending(null);};
+  const saveNote=async note=>{const book=selBook;const updatedNotes=editNote?book.notes.map(n=>n.id===editNote.id?{...n,...note,editedAt:new Date().toISOString()}:n):[{...note,id:Date.now(),createdAt:new Date().toISOString()},...book.notes];const updated={...book,notes:updatedNotes};await supa.updateBook(book.id,updated);setBooks(prev=>prev.map(b=>b.id===book.id?updated:b));setSelBook(updated);setNoteModal(false);setEditNote(null);};
+  const delNote=async id=>{const updated={...selBook,notes:selBook.notes.filter(n=>n.id!==id)};await supa.updateBook(selBook.id,updated);setBooks(prev=>prev.map(b=>b.id===selBook.id?updated:b));setSelBook(updated);};
+  const updBook=async(id,upd)=>{const book=books.find(b=>b.id===id);const updated={...book,...upd};await supa.updateBook(id,updated);setBooks(prev=>prev.map(b=>b.id===id?updated:b));if(selBook?.id===id)setSelBook(updated);};
+  const recordPage=async(id,page,total)=>{const book=books.find(b=>b.id===id);const entry={page,total,date:new Date().toISOString()};const isFinished=total&&Number(page)>=Number(total);const updated={...book,currentPage:page,totalPages:total,pageHistory:[...(book.pageHistory||[]),entry],...(isFinished&&book.status!=="done"?{status:"done",finishedAt:new Date().toISOString()}:{})};await supa.updateBook(id,updated);setBooks(prev=>prev.map(b=>b.id===id?updated:b));if(selBook?.id===id)setSelBook(updated);};
+  const delBook=async id=>{await supa.deleteBook(id);setBooks(prev=>prev.filter(b=>b.id!==id));setView("home");setSelBook(null);};
+  const saveVocab=async v=>{if(editVocab){const row=await supa.updateVocab(editVocab.id,v);setVocab(prev=>prev.map(w=>w.id===editVocab.id?fromVocabRow({...editVocab,...v,...(row||{})}):w));}else{const row=await supa.insertVocab(v);if(row?.id)setVocab(prev=>[fromVocabRow(row),...prev]);}setVocabModal(false);setEditVocab(null);};
+  const delVocab=async id=>{await supa.deleteVocab(id);setVocab(prev=>prev.filter(w=>w.id!==id));};
+
+  const goAdd=()=>{setView("add");setAddStep(1);setPending(null);setSearchQ("");setSearchRes([]);};
+  const goDetail=b=>{setSelBook(b);setView("detail");};
+  const goHome=()=>{setView("home");setSelBook(null);};
+  const filtered=books.filter(b=>filter==="all"?true:filter==="reading"?b.status==="reading":b.status==="done");
+
+  if(loading&&session===null)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}><div style={{textAlign:"center"}}><div className="brand-title" style={{fontSize:22,color:"#333",fontFamily:"'Black Han Sans',sans-serif"}}>BOOKITORY</div><div style={{color:C.textMid,fontSize:14,marginTop:8,fontFamily:F}}>불러오는 중...</div></div></div>;
+  if(!session)return <AuthScreen onLogin={sess=>{supa._session=sess;setSession(sess);}}/>;
+
+  return (
+    <div style={S.root}>
+      <nav style={S.nav}>
+        <button onClick={goHome} style={S.brand} className="brand-title">BOOKITORY</button>
+        <div style={S.navR}>
+          <button style={S.navLink} onClick={()=>setView("vocab")}>단어장</button>
+          <button style={S.navLink} onClick={()=>setView("backup")}>백업</button>
+          <button style={S.navLink} onClick={async()=>{await supa.signOut();setSession(false);setBooks([]);setVocab([]);setView("home");}}>로그아웃</button>
+          <button style={S.pill} onClick={goAdd}>+ 책 추가</button>
+        </div>
+      </nav>
+
+      {view==="home"&&<main style={S.main}><StatsBar books={books} vocab={vocab}/><div style={S.filterRow}>{[["all","전체"],["reading","읽는 중"],["done","완독"]].map(([k,l])=><button key={k} style={{...S.filterBtn,...(filter===k?S.filterActive:{})}} onClick={()=>setFilter(k)}>{l}</button>)}</div>{loading?<div style={{textAlign:"center",padding:"40px 0",color:C.textSoft}}>동기화 중...</div>:filtered.length===0?<div style={S.empty}><div style={{fontSize:44}}>📚</div><p style={{color:C.textMid,margin:0,fontFamily:F}}>아직 책이 없어요</p><button style={S.pill} onClick={goAdd}>첫 책 추가하기</button></div>:<div style={S.grid} className="book-grid">{filtered.map(b=><BookCard key={b.id} book={b} onClick={()=>goDetail(b)}/>)}</div>}</main>}
+
+      {view==="detail"&&selBook&&<BookDetail book={selBook} onBack={goHome} onUpdate={updBook} onDel={delBook} onRecordPage={recordPage} onAddNote={()=>{setEditNote(null);setNoteModal(true);}} onEditNote={n=>{setEditNote(n);setNoteModal(true);}} onDelNote={delNote}/>}
+
+      {view==="add"&&<main style={S.main}><SubHeader title="책 추가" onBack={goHome}/>{addStep===1&&<><div style={S.searchWrap}><span style={{color:C.textSoft}}>🔍</span><input style={S.searchInput} placeholder="제목이나 저자로 검색..." value={searchQ} onChange={e=>handleSearch(e.target.value)} autoFocus/></div>{searching&&<p style={S.hint}>검색 중...</p>}{searchRes.map((r,i)=><div key={i} style={S.resItem} className="hover-card" onClick={()=>pickBook(r)}><CoverThumb src={r.cover}/><div><div style={S.resTitle}>{r.title}</div><div style={S.resMeta}>{r.author}</div><div style={S.resMeta}>{[r.publisher,r.year&&r.year+"년"].filter(Boolean).join(" · ")}</div></div></div>)}{!searching&&!searchRes.length&&searchQ&&<button style={S.ghost} onClick={()=>{setPending({title:"",author:"",publisher:"",year:"",cover:null,status:"reading",currentPage:"",totalPages:"",emotion:EMOTIONS[0],notes:[],startedAt:new Date().toISOString(),pageHistory:[],finishedAt:null,addedAt:new Date().toISOString()});setAddStep(2);}}>직접 입력하기</button>}</>}{addStep===2&&pending&&<AddForm book={pending} onChange={setPending} onBack={()=>setAddStep(1)} onConfirm={confirmAdd}/>}</main>}
+
+      {view==="vocab"&&<main style={S.main}><SubHeader title="단어장" onBack={goHome} right={<button style={S.pill} onClick={()=>{setEditVocab(null);setVocabModal(true);}}>+ 추가</button>}/>{vocab.length===0?<div style={S.empty}><div style={{fontSize:44}}>📝</div><p style={{color:C.textMid,fontFamily:F}}>모르는 단어를 기록해보세요</p></div>:vocab.map(w=><div key={w.id} style={S.vocabCard}><div style={S.vocabWord}>{w.word}</div>{w.meaning&&<div style={S.vocabMeaning}>{w.meaning}</div>}{w.example&&<div style={S.vocabEx}>"{w.example}"</div>}{w.bookTitle&&<div style={S.vocabSrc}>📖 {w.bookTitle}</div>}<div style={S.row}><Chip onClick={()=>{setEditVocab(w);setVocabModal(true);}}>편집</Chip><Chip danger onClick={()=>delVocab(w.id)}>삭제</Chip></div></div>)}</main>}
+
+      {view==="backup"&&<BackupView books={books} vocab={vocab} onBack={goHome} userEmail={session?.user?.email}/>}
+
+      {noteModal&&<NoteModal initial={editNote} onSave={saveNote} onClose={()=>{setNoteModal(false);setEditNote(null);}}/>}
+      {vocabModal&&<VocabModal initial={editVocab} books={books} onSave={saveVocab} onClose={()=>{setVocabModal(false);setEditVocab(null);}}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
