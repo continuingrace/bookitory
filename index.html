@@ -14,10 +14,10 @@
       background-color: #F4F2EF;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
     }
-    @import url('https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&family=Black+Han+Sans&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&display=swap');
     .brand-title {
-      font-family: 'Black Han Sans', sans-serif !important;
-      letter-spacing: 24px;
+      font-family: 'Pretendard Variable', Pretendard, sans-serif !important; font-weight: 800;
+      letter-spacing: 2px;
       text-transform: uppercase;
     }
     .book-card { position: relative; overflow: visible !important; }
@@ -50,7 +50,8 @@
       .book-grid { grid-template-columns: repeat(2,1fr) !important; }
     }
   </style>
-  <link href="https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&family=Black+Han+Sans&display=swap" rel="stylesheet"/>
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&display=swap" rel="stylesheet"/>
 </head>
 <body>
 <div id="root"></div>
@@ -133,7 +134,7 @@ const fmtFull = iso => { if(!iso)return""; const d=new Date(iso); return `${fmtD
 const S = {
   root:{minHeight:"100vh",background:C.bg,fontFamily:F,color:C.text},
   nav:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 20px",height:52,background:C.surface,borderBottom:`1.5px solid ${C.text}`,position:"sticky",top:0,zIndex:100},
-  brand:{background:"none",border:"none",cursor:"pointer",fontSize:15,fontWeight:700,color:"#333",padding:0,fontFamily:"'Black Han Sans',sans-serif"},
+  brand:{background:"none",border:"none",cursor:"pointer",fontSize:15,fontWeight:700,color:"#333",padding:0,fontFamily:"'Pretendard Variable',Pretendard,sans-serif"},
   navR:{display:"flex",alignItems:"center",gap:8},
   navLink:{background:"none",border:"none",cursor:"pointer",fontSize:13,color:C.textMid,fontFamily:F},
   pill:{background:C.accent,color:C.accentText,border:`1.5px solid ${C.accentText}`,borderRadius:4,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:F,boxShadow:"2px 2px 0 "+C.accentText},
@@ -495,7 +496,7 @@ function AuthScreen({onLogin}) {
     <div style={S.authWrap}>
       <div style={S.authBox}>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:22}}>
-          <div className="brand-title" style={{fontSize:26,color:"#333",fontFamily:"'Black Han Sans',sans-serif"}}>BOOKITORY</div>
+          <div className="brand-title" style={{fontSize:26,color:"#333",fontFamily:"'Pretendard Variable',Pretendard,sans-serif"}}>BOOKITORY</div>
           <div style={{fontSize:12,color:C.textSoft,marginTop:8,fontFamily:F}}>나만의 독서 기록 공간</div>
         </div>
         <div style={{display:"flex",background:C.bg,borderRadius:4,padding:3,marginBottom:20,gap:4,border:`1.5px solid ${C.border}`}}>
@@ -554,7 +555,7 @@ function App() {
   const goHome=()=>{setView("home");setSelBook(null);};
   const filtered=books.filter(b=>filter==="all"?true:filter==="reading"?b.status==="reading":b.status==="done");
 
-  if(loading&&session===null)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}><div style={{textAlign:"center"}}><div className="brand-title" style={{fontSize:22,color:"#333",fontFamily:"'Black Han Sans',sans-serif"}}>BOOKITORY</div><div style={{color:C.textMid,fontSize:14,marginTop:8,fontFamily:F}}>불러오는 중...</div></div></div>;
+  if(loading&&session===null)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}><div style={{textAlign:"center"}}><div className="brand-title" style={{fontSize:22,color:"#333",fontFamily:"'Pretendard Variable',Pretendard,sans-serif"}}>BOOKITORY</div><div style={{color:C.textMid,fontSize:14,marginTop:8,fontFamily:F}}>불러오는 중...</div></div></div>;
   if(!session)return <AuthScreen onLogin={sess=>{supa._session=sess;setSession(sess);}}/>;
 
   return (
