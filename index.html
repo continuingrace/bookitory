@@ -113,8 +113,8 @@ const supa = {
   async updateBook(id,book) { const r=await fetch(`${SUPA_URL}/rest/v1/books?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"PATCH",headers:supa.headers(),body:JSON.stringify(toRow(book))}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
   async deleteBook(id) { await fetch(`${SUPA_URL}/rest/v1/books?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"DELETE",headers:supa.headers()}); },
   async getVocab() { const r=await fetch(`${SUPA_URL}/rest/v1/vocab?user_id=eq.${supa.userId()}&order=created_at.desc`,{headers:supa.headers()}); return r.json(); },
-  async insertVocab(v) { const r=await fetch(`${SUPA_URL}/rest/v1/vocab`,{method:"POST",headers:supa.headers(),body:JSON.stringify({...v,user_id:supa.userId()})}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
-  async updateVocab(id,v) { const r=await fetch(`${SUPA_URL}/rest/v1/vocab?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"PATCH",headers:supa.headers(),body:JSON.stringify(v)}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
+  async insertVocab(v) { const row={word:v.word,meaning:v.meaning,example:v.example,book_title:v.bookTitle,user_id:supa.userId()}; const r=await fetch(`${SUPA_URL}/rest/v1/vocab`,{method:"POST",headers:supa.headers(),body:JSON.stringify(row)}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
+  async updateVocab(id,v) { const row={word:v.word,meaning:v.meaning,example:v.example,book_title:v.bookTitle}; const r=await fetch(`${SUPA_URL}/rest/v1/vocab?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"PATCH",headers:supa.headers(),body:JSON.stringify(row)}); const d=await r.json(); return Array.isArray(d)?d[0]:d; },
   async deleteVocab(id) { await fetch(`${SUPA_URL}/rest/v1/vocab?id=eq.${id}&user_id=eq.${supa.userId()}`,{method:"DELETE",headers:supa.headers()}); },
 };
 
