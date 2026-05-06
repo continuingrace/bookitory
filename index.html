@@ -148,22 +148,52 @@ const METAPHORS = [
 const getMetaphor = pct => METAPHORS.find(m=>pct<=m.max)||METAPHORS[METAPHORS.length-1];
 
 async function searchBooks(q) {
-  // Google Books API — 무료, CORS 허용, 한국어 책도 잘 검색됨
-  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=12&printType=books&orderBy=relevance`);
-  const j = await r.json();
-  if (!j.items) return [];
-  return j.items.map(item => {
-    const info = item.volumeInfo || {};
-    const cover = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null;
-    return {
-      olId: item.id,
-      title: info.title || "",
-      author: (info.authors || []).join(", "),
-      publisher: info.publisher || "",
-      year: info.publishedDate ? info.publishedDate.slice(0,4) : "",
-      cover: cover ? cover.replace("http://","https://") : null,
-    };
-  });
+  const results = [];
+  const seen = new Set();
+
+  // 1) 카카오 책 검색 (한국 책에 강함 — 제목/저자/출판사 모두 검색)
+  try {
+    const r = await fetch(`https://dapi.kakao.com/v3/search/book?query=${encodeURIComponent(q)}&size=12`, {
+      headers: { Authorization: "KakaoAK 6d81533b7da989741f560eaf202aa511" }
+    });
+    const j = await r.json();
+    (j.documents || []).forEach(d => {
+      const key = d.title + (d.authors||[]).join("");
+      if (seen.has(key)) return;
+      seen.add(key);
+      results.push({
+        olId: "kakao_" + d.isbn,
+        title: d.title || "",
+        author: (d.authors || []).join(", "),
+        publisher: d.publisher || "",
+        year: d.datetime ? d.datetime.slice(0,4) : "",
+        cover: d.thumbnail || null,
+      });
+    });
+  } catch(e) {}
+
+  // 2) Google Books (보완용 — 카카오에 없는 해외 책 등)
+  try {
+    const r2 = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=8&printType=books&orderBy=relevance`);
+    const j2 = await r2.json();
+    (j2.items || []).forEach(item => {
+      const info = item.volumeInfo || {};
+      const key = (info.title||"") + (info.authors||[]).join("");
+      if (seen.has(key)) return;
+      seen.add(key);
+      const cover = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null;
+      results.push({
+        olId: item.id,
+        title: info.title || "",
+        author: (info.authors || []).join(", "),
+        publisher: info.publisher || "",
+        year: info.publishedDate ? info.publishedDate.slice(0,4) : "",
+        cover: cover ? cover.replace("http://","https://") : null,
+      });
+    });
+  } catch(e) {}
+
+  return results;
 }
 
 const fmtDate = iso => { if(!iso)return""; const d=new Date(iso); return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`; };
