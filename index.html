@@ -149,7 +149,7 @@ const getMetaphor = pct => METAPHORS.find(m=>pct<=m.max)||METAPHORS[METAPHORS.le
 
 async function searchBooks(q) {
   // Google Books API — 무료, CORS 허용, 한국어 책도 잘 검색됨
-  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=10&langRestrict=ko&printType=books`);
+  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=12&printType=books&orderBy=relevance`);
   const j = await r.json();
   if (!j.items) return [];
   return j.items.map(item => {
