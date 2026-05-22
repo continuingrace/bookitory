@@ -14,13 +14,13 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&display=swap');
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Nanum Square Neo', sans-serif;
       background-color: #F4F2EF;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
     }
-    @import url('https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&display=swap');
     .brand-title {
       font-family: 'Pretendard Variable', Pretendard, sans-serif !important; font-weight: 800;
       letter-spacing: 2px;
@@ -57,7 +57,6 @@
     }
   </style>
   <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" rel="stylesheet"/>
-  <link href="https://fonts.googleapis.com/css2?family=Nanum+Square+Neo:wght@300;400;700;800;900&display=swap" rel="stylesheet"/>
 </head>
 <body>
 <div id="root"></div>
@@ -99,8 +98,10 @@ const supa = {
     } catch(e) { supa._session = session; return session; }
     localStorage.removeItem("supa_session"); return null;
   },
+  _refreshTimer: null,
   startAutoRefresh() {
-    setInterval(async () => {
+    if (supa._refreshTimer) clearInterval(supa._refreshTimer);
+    supa._refreshTimer = setInterval(async () => {
       const saved = localStorage.getItem("supa_session");
       if (!saved || !supa._session) return;
       const session = JSON.parse(saved);
@@ -111,6 +112,9 @@ const supa = {
         if (data.access_token) { supa._session=data; localStorage.setItem("supa_session",JSON.stringify(data)); }
       } catch(e) {}
     }, 50 * 60 * 1000);
+  },
+  stopAutoRefresh() {
+    if (supa._refreshTimer) { clearInterval(supa._refreshTimer); supa._refreshTimer = null; }
   },
   headers() { return {"Content-Type":"application/json",apikey:SUPA_KEY,Authorization:`Bearer ${supa._session?.access_token||SUPA_KEY}`,Prefer:"return=representation"}; },
   userId() { return supa._session?.user?.id; },
@@ -591,7 +595,21 @@ function BackupView({books,vocab,onBack,userEmail}) {
         <div style={{fontSize:13,color:C.textMid,marginBottom:16}}>이전에 다운로드한 <b>.json 백업 파일</b>을 선택해주세요.</div>
         <label style={S.fileLabel}>파일 선택하기<input type="file" accept=".json" style={{display:"none"}} onChange={handleRestore}/></label>
         {restoreMsg&&<div style={{marginTop:12,fontSize:13,color:C.textMid,whiteSpace:"pre-line",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:3,padding:"10px 14px"}}>{restoreMsg}</div>}
-        {restoreFile&&<button style={{...S.backupBtn,marginTop:10,background:C.accent,color:C.accentText,border:`1.5px solid ${C.accentText}`,boxShadow:`2px 2px 0 ${C.accentText}`}} onClick={()=>alert("복구 기능은 추후 업데이트 예정이에요.\n지금은 백업 파일을 안전하게 보관해주세요.")}>이 파일로 복구하기</button>}
+        {restoreFile&&<button style={{...S.backupBtn,marginTop:10,background:C.accent,color:C.accentText,border:`1.5px solid ${C.accentText}`,boxShadow:`2px 2px 0 ${C.accentText}`}} onClick={async()=>{
+          if(!window.confirm("현재 데이터가 백업 파일로 교체돼요. 계속할까요?"))return;
+          setRestoreMsg("복구 중...");
+          try {
+            // 기존 데이터 삭제
+            const[existBooks,existVocab]=await Promise.all([supa.getBooks(),supa.getVocab()]);
+            await Promise.all((existBooks||[]).map(b=>supa.deleteBook(b.id)));
+            await Promise.all((existVocab||[]).map(v=>supa.deleteVocab(v.id)));
+            // 백업 데이터 삽입
+            await Promise.all(restoreFile.books.map(b=>supa.insertBook(b)));
+            await Promise.all(restoreFile.vocab.map(v=>supa.insertVocab({word:v.word,meaning:v.meaning,example:v.example,bookTitle:v.bookTitle})));
+            setRestoreMsg("✅ 복구 완료! 페이지를 새로고침할게요.");
+            setTimeout(()=>window.location.reload(),1500);
+          } catch(e) { setRestoreMsg("❌ 복구 중 오류가 발생했어요. 다시 시도해주세요."); }
+        }}>이 파일로 복구하기</button>}
       </div>
     </main>
   );
@@ -649,9 +667,33 @@ function App() {
   const [editVocab,setEditVocab]=useState(null);
   const timer=useRef(null);
 
-  useEffect(()=>{(async()=>{const sess=await supa.refreshSession();setSession(sess||false);setLoading(false);if(sess)supa.startAutoRefresh();})();},[]);
-  useEffect(()=>{if(session)loadAll();},[session]);
-  async function loadAll(){setLoading(true);const[bRows,vRows]=await Promise.all([supa.getBooks(),supa.getVocab()]);setBooks((bRows||[]).map(fromRow));setVocab((vRows||[]).map(fromVocabRow));setLoading(false);}
+  useEffect(()=>{
+    (async()=>{
+      try {
+        const sess = await supa.refreshSession();
+        setSession(sess || false);
+        if (sess) supa.startAutoRefresh();
+      } catch(e) {
+        // 세션 복구 실패해도 절대 튕기지 않고 로그인 화면으로
+        setSession(false);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  },[]);
+  useEffect(()=>{if(session&&session!==false)loadAll();},[session]);
+  async function loadAll(){
+    setLoading(true);
+    try {
+      const[bRows,vRows]=await Promise.all([supa.getBooks(),supa.getVocab()]);
+      setBooks((bRows||[]).map(fromRow));
+      setVocab((vRows||[]).map(fromVocabRow));
+    } catch(e) {
+      // 데이터 로드 실패해도 빈 상태로 유지
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const handleSearch=q=>{setSearchQ(q);clearTimeout(timer.current);if(!q.trim()){setSearchRes([]);return;}timer.current=setTimeout(async()=>{setSrching(true);try{setSearchRes(await searchBooks(q));}catch{setSearchRes([]);}setSrching(false);},500);};
   const pickBook=b=>{setPending({...b,id:null,status:"reading",currentPage:"",totalPages:"",emotion:EMOTIONS[0],notes:[],startedAt:new Date().toISOString(),pageHistory:[],finishedAt:null,addedAt:new Date().toISOString()});setAddStep(2);};
@@ -659,7 +701,18 @@ function App() {
   const saveNote=async note=>{const book=selBook;const updatedNotes=editNote?book.notes.map(n=>n.id===editNote.id?{...n,...note,editedAt:new Date().toISOString()}:n):[{...note,id:Date.now(),createdAt:new Date().toISOString()},...book.notes];const updated={...book,notes:updatedNotes};await supa.updateBook(book.id,updated);setBooks(prev=>prev.map(b=>b.id===book.id?updated:b));setSelBook(updated);setNoteModal(false);setEditNote(null);};
   const delNote=async id=>{const updated={...selBook,notes:selBook.notes.filter(n=>n.id!==id)};await supa.updateBook(selBook.id,updated);setBooks(prev=>prev.map(b=>b.id===selBook.id?updated:b));setSelBook(updated);};
   const updBook=async(id,upd)=>{const book=books.find(b=>b.id===id);const updated={...book,...upd};await supa.updateBook(id,updated);setBooks(prev=>prev.map(b=>b.id===id?updated:b));if(selBook?.id===id)setSelBook(updated);};
-  const recordPage=async(id,page,total)=>{const book=books.find(b=>b.id===id);const entry={page,total,date:new Date().toISOString()};const isFinished=total&&Number(page)>=Number(total);const updated={...book,currentPage:page,totalPages:total,pageHistory:[...(book.pageHistory||[]),entry],...(isFinished&&book.status!=="done"?{status:"done",finishedAt:new Date().toISOString()}:{})};await supa.updateBook(id,updated);setBooks(prev=>prev.map(b=>b.id===id?updated:b));if(selBook?.id===id)setSelBook(updated);};
+  const recordPage=async(id,page,total)=>{
+    setBooks(prev=>{
+      const book=prev.find(b=>b.id===id);
+      if(!book)return prev;
+      const entry={page,total,date:new Date().toISOString()};
+      const isFinished=total&&Number(page)>=Number(total);
+      const updated={...book,currentPage:page,totalPages:total,pageHistory:[...(book.pageHistory||[]),entry],...(isFinished&&book.status!=="done"?{status:"done",finishedAt:new Date().toISOString()}:{})};
+      supa.updateBook(id,updated);
+      if(selBook?.id===id)setSelBook(updated);
+      return prev.map(b=>b.id===id?updated:b);
+    });
+  };
   const delBook=async id=>{await supa.deleteBook(id);setBooks(prev=>prev.filter(b=>b.id!==id));setView("home");setSelBook(null);};
   const saveVocab=async v=>{if(editVocab){const row=await supa.updateVocab(editVocab.id,v);setVocab(prev=>prev.map(w=>w.id===editVocab.id?fromVocabRow({...editVocab,...v,...(row||{})}):w));}else{const row=await supa.insertVocab(v);if(row?.id)setVocab(prev=>[fromVocabRow(row),...prev]);}setVocabModal(false);setEditVocab(null);};
   const delVocab=async id=>{await supa.deleteVocab(id);setVocab(prev=>prev.filter(w=>w.id!==id));};
@@ -679,7 +732,7 @@ function App() {
         <div style={S.navR}>
           <button style={S.navLink} onClick={()=>setView("vocab")}>단어장</button>
           <button style={S.navLink} onClick={()=>setView("backup")}>백업</button>
-          <button style={S.navLink} onClick={async()=>{await supa.signOut();setSession(false);setBooks([]);setVocab([]);setView("home");}}>로그아웃</button>
+          <button style={S.navLink} onClick={async()=>{supa.stopAutoRefresh();await supa.signOut();setSession(false);setBooks([]);setVocab([]);setView("home");}}>로그아웃</button>
           <button style={S.pill} onClick={goAdd}>+ 책 추가</button>
         </div>
       </nav>
