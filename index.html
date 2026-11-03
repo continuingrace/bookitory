@@ -81,7 +81,8 @@ const getMetaphor = pct => METAPHORS.find(m=>pct<=m.max)||METAPHORS[METAPHORS.le
 async function searchBooks(q) {
   const results = []; const seen = new Set();
   try {
-    const r = await fetch(`https://dapi.kakao.com/v3/search/book?query=${encodeURIComponent(q)}&size=12`,{headers:{Authorization:"KakaoAK 6d81533b7da989741f560eaf202aa511"}});
+    const r = await fetch(`https://bookitory-secure.netlify.app/.netlify/functions/search-books?q=${encodeURIComponent(q)}`);
+    if (!r.ok) throw new Error("Kakao search failed");
     const j = await r.json();
     (j.documents||[]).forEach(d=>{const key=d.title+(d.authors||[]).join("");if(seen.has(key))return;seen.add(key);results.push({olId:"kakao_"+d.isbn,title:d.title||"",author:(d.authors||[]).join(", "),publisher:d.publisher||"",year:d.datetime?d.datetime.slice(0,4):"",cover:d.thumbnail||null});});
   } catch(e){}
